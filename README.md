@@ -51,7 +51,7 @@ python3 mepa.py --progfile <arquivo.mepa> --silent
 
 ```bash
 make exemplos                               # compila testes/exemplos e testes/erros
-make teste                                  # bateria automática (75 casos)
+make teste                                  # bateria automática (81 casos)
 make teste MEPA=/caminho/para/mepa.py       # se o interpretador estiver em outro lugar
 ```
 
@@ -85,9 +85,17 @@ Sombreamento em escopos diferentes (variável local com o nome de uma global) é
 
 ## Limitações conhecidas
 
-- Exige ao menos um `return` em cada `func`, mas não verifica todos os caminhos.
-- Índice de vetor dado por variável não tem checagem de limite em tempo de execução
-  (índice constante fora de 1..n é erro de compilação).
+- A análise de retorno verifica os caminhos das funções. Um `while` conta como
+  retorno garantido quando sua condição pode ser reconhecida como constante e
+  verdadeira e seu corpo garante retorno.
+- Índices constantes fora de `1..n` geram erro de compilação. Índices dados por
+  variáveis são verificados em execução e encerram o programa fora do intervalo.
+- `get` usa `LEIT`. Na versão fornecida do interpretador MEPA, a leitura de
+  inteiros negativos, como `-12`, falha na própria instrução.
+- `choose` aceita valores individuais e listas conforme o Apêndice A.
+- O compilador valida a capacidade representável dos endereços e das
+  alocações. A capacidade da pilha em execução depende do interpretador
+  (opção `--stacksize`).
 - Não implementado: atribuição de vetor inteiro, comparação entre vetores/strings e `get` de `str`.
 - Chamar uma sub-rotina antes de declará-la é erro (declaração prévia).
 - No `echo`, inteiros (`IMPR`) e caracteres (`IMPC`) quebram linha; strings (`IMPS`) não.

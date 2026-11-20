@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <stdint.h>
 #define MAX_IDS 128
 #define MAX_ARGS 128
 #define STR_CELLS 256
@@ -34,6 +35,9 @@
 static Lex *lexico;
 static Token atual;
 static int trace_depth, viu_main, blocos_sub;
+typedef struct { int conhecido, valor; } Constante;
+static Constante constante;
+
 static int eof_registrado; /*evita registrar o sEOF duas vezes no .tk*/
 /*
  * globais/locais: posicoes de memoria ja ocupadas (proximo endereco livre)
@@ -92,8 +96,12 @@ static int vetor(TipoSimbolo t) {
 static TipoSimbolo base(TipoSimbolo t) {
     return t==TS_INT_VET?TS_INT:t==TS_LOGIC_VET?TS_LOGIC:t==TS_CHR_VET?TS_CHR:t;
 }
-static int tamanho(TipoSimbolo t,int ext) {
-    return t==TS_STR?STR_CELLS:vetor(t)?ext+1:1;
+static int reserva_celulas(int *total, int64_t quantidade, int linha) {
+    int inicio = *total;
+    if (quantidade > INT_MAX - inicio)
+        diag_error(linha, "alocacao excede o limite de celulas MEPA");
+    *total += (int)quantidade;
+    return inicio;
 }
 /*DECLARACAO PREVIA: identificador precisa existir na cadeia de escopos visiveis*/
 static int resolver(Token id) {
@@ -241,10 +249,10 @@ static void decls(CategoriaSimbolo cat) {
     consumir(sPONTOVIRGULA);
     for(i=0;i<n;i++){
         int idx=ts_insert(ids[i].lexema,cat,t,cap,ids[i].linha);
-        int slot=cat==TS_VAR_GLOBAL?globais:locais;
+        int *total = cat == TS_VAR_GLOBAL ? &globais : &locais;
+        int64_t celulas = t == TS_STR ? STR_CELLS : vetor(t) ? (int64_t)cap + 1 : 1;
+        int slot = reserva_celulas(total, celulas, ids[i].linha);
         ts_set_addr(idx,slot,cat==TS_VAR_GLOBAL?0:1);
-        if(cat==TS_VAR_GLOBAL)globais+=tamanho(t,cap);
-        else locais+=tamanho(t,cap);
     }
     sair("decls");
 }
@@ -383,20 +391,50 @@ static TipoSimbolo chamada(Token id,int expressao) {
  * <elem> ::= <litl> | <id> | <vetr> | <call>
  * ~ exige logic (NEGA); - unario exige int (INVR).
  */
+/* Avalia constantes para a analise de retorno sem alterar o codigo emitido. */
+static void calcula_constante(CategoriaToken op, Constante esquerda) {
+    int64_t a = esquerda.valor, b = constante.valor, valor;
+    int conhecida = esquerda.conhecido && constante.conhecido;
+    constante = (Constante){0, 0};
+    if (!conhecida) return;
+
+    switch (op) {
+        case sSOMA: valor = a + b; break;
+        case sSUBRAT: valor = a - b; break;
+        case sMULT: valor = a * b; break;
+        /* A divisao fica a cargo da VM, inclusive erros e arredondamento. */
+        case sMAIOR: valor = a > b; break;
+        case sMAIORIGUAL: valor = a >= b; break;
+        case sMENOR: valor = a < b; break;
+        case sMENORIGUAL: valor = a <= b; break;
+        case sIGUAL: valor = a == b; break;
+        case sDIFERENTE: valor = a != b; break;
+        case sAND: valor = a && b; break;
+        case sOR: valor = a || b; break;
+        default: return;
+    }
+    if (valor >= INT_MIN && valor <= INT_MAX)
+        constante = (Constante){1, (int)valor};
+}
+
 static TipoSimbolo fact(void) {
     TipoSimbolo t=TS_VOID;
     Token id;
     int ln=atual.linha;
     entrar("fact");
+    constante = (Constante){0, 0};
     if(aceitar(sNEG)){
         t=fact();
         exige(t,TS_LOGIC,ln);
         gen_emit("NEGA");
+        if (constante.conhecido) constante.valor = !constante.valor;
     }
     else if(aceitar(sSUBRAT)){
         t=fact();
         exige(t,TS_INT,ln);
         gen_emit("INVR");
+        Constante zero = {1, 0};
+        calcula_constante(sSUBRAT, zero);
     }
     else if(aceitar(sABREPAR)){
         t=expr();
@@ -404,7 +442,9 @@ static TipoSimbolo fact(void) {
     }
     else if(atual.categoria==sCTEINT){
         id=consumir(sCTEINT);
-        gen_emit("CRCT %d",inteiro(id));
+        int valor = inteiro(id);
+        gen_emit("CRCT %d",valor);
+        constante = (Constante){1, valor};
         t=TS_INT;
     }
     else if(atual.categoria==sCTECHAR){
@@ -412,6 +452,7 @@ static TipoSimbolo fact(void) {
         int cp, count=utf8_info(id.lexema,&cp);
         if(count!=1)diag_error(id.linha,"literal de caractere invalido");
         gen_emit("CRCT %d",cp);
+        constante = (Constante){1, cp};
         t=TS_CHR;
     }
     else if(atual.categoria==sSTRING){
@@ -444,6 +485,7 @@ static TipoSimbolo fact(void) {
             else if(vetor(t))diag_error(id.linha,"vetor exige indice na expressao");
             else load(k);
         }
+        constante = (Constante){0, 0};
     }
     else diag_error(atual.linha,"operando invalido %s \"%s\"",lex_nome_categoria(atual.categoria),atual.lexema);
     sair("fact");
@@ -458,10 +500,12 @@ static TipoSimbolo earip(void){
         CategoriaToken op=atual.categoria;
         int ln=atual.linha;
         avancar();
+        Constante esquerda = constante;
         r=fact();
         exige(t,TS_INT,ln);
         exige(r,TS_INT,ln);
         gen_emit(op==sMULT?"MULT":"DIVI");
+        calcula_constante(op, esquerda);
         t=TS_INT;
     }
     sair("earip");
@@ -476,29 +520,49 @@ static TipoSimbolo earit(void){
         CategoriaToken op=atual.categoria;
         int ln=atual.linha;
         avancar();
+        Constante esquerda = constante;
         r=earip();
         exige(t,TS_INT,ln);
         exige(r,TS_INT,ln);
         gen_emit(op==sSOMA?"SOMA":"SUBT");
+        calcula_constante(op, esquerda);
         t=TS_INT;
     }
     sair("earit");
     return t;
 }
-/* <erlac> ::= <earit> {<oprel> <earit>}   lados iguais; < <= > >= so int/chr -> logic */
-static TipoSimbolo erlac(void){
-    TipoSimbolo t,r;
-    entrar("erlac");
-    t=earit();
-    while(atual.categoria==sMAIOR||atual.categoria==sMAIORIGUAL||atual.categoria==sMENOR||atual.categoria==sMENORIGUAL||atual.categoria==sIGUAL||atual.categoria==sDIFERENTE){
-        CategoriaToken op=atual.categoria;
-        int ln=atual.linha;
+/* Comparacoes ordenadas precedem igualdade e diferenca (manual, p. 7). */
+static TipoSimbolo comparacao(void){
+    TipoSimbolo t = earit();
+    while(atual.categoria==sMAIOR||atual.categoria==sMAIORIGUAL||
+          atual.categoria==sMENOR||atual.categoria==sMENORIGUAL){
+        CategoriaToken op = atual.categoria;
+        int ln = atual.linha;
+        Constante esquerda = constante;
         avancar();
-        r=earit();
+        TipoSimbolo r = earit();
+        igual(t,r,ln);
+        if(t!=TS_INT&&t!=TS_CHR)diag_error(ln,"comparacao ordenada exige int ou chr");
+        gen_emit("%s",op==sMAIOR?"CMMA":op==sMAIORIGUAL?"CMAG":op==sMENOR?"CMME":"CMEG");
+        calcula_constante(op, esquerda);
+        t=TS_LOGIC;
+    }
+    return t;
+}
+
+static TipoSimbolo erlac(void){
+    entrar("erlac");
+    TipoSimbolo t = comparacao();
+    while(atual.categoria==sIGUAL||atual.categoria==sDIFERENTE){
+        CategoriaToken op = atual.categoria;
+        int ln = atual.linha;
+        Constante esquerda = constante;
+        avancar();
+        TipoSimbolo r = comparacao();
         igual(t,r,ln);
         if(vetor(t)||t==TS_STR)diag_error(ln,"comparacao de vetores/strings nao suportada na MEPA");
-        if(op!=sIGUAL&&op!=sDIFERENTE&&t!=TS_INT&&t!=TS_CHR)diag_error(ln,"comparacao ordenada exige int ou chr");
-        gen_emit("%s",op==sMAIOR?"CMMA":op==sMAIORIGUAL?"CMAG":op==sMENOR?"CMME":op==sMENORIGUAL?"CMEG":op==sIGUAL?"CMIG":"CMDG");
+        gen_emit("%s",op==sIGUAL?"CMIG":"CMDG");
+        calcula_constante(op, esquerda);
         t=TS_LOGIC;
     }
     sair("erlac");
@@ -511,10 +575,12 @@ static TipoSimbolo elogc(void){
     t=erlac();
     while(aceitar(sAND)){
         int ln=atual.linha;
+        Constante esquerda = constante;
         r=erlac();
         exige(t,TS_LOGIC,ln);
         exige(r,TS_LOGIC,ln);
         gen_emit("CONJ");
+        calcula_constante(sAND, esquerda);
         t=TS_LOGIC;
     }
     sair("elogc");
@@ -527,10 +593,12 @@ static TipoSimbolo expr(void){
     t=elogc();
     while(aceitar(sOR)){
         int ln=atual.linha;
+        Constante esquerda = constante;
         r=elogc();
         exige(t,TS_LOGIC,ln);
         exige(r,TS_LOGIC,ln);
         gen_emit("DISJ");
+        calcula_constante(sOR, esquerda);
         t=TS_LOGIC;
     }
     sair("expr");
@@ -628,7 +696,7 @@ static int choose_cmd(void){
     entrar("chse");
     consumir(sCHOOSE);
     consumir(sABREPAR);
-    slot=locais++;
+    slot=reserva_celulas(&locais,1,atual.linha);
     gen_emit("AMEM 1");
     t=expr();
     exige(t,TS_INT,atual.linha);
@@ -712,7 +780,7 @@ static void for_cmd(void){
     valor_for();
     store(k);
     consumir(sTO);
-    int limite=locais++;
+    int limite=reserva_celulas(&locais,1,atual.linha);
     gen_emit("AMEM 1");
     valor_for();
     gen_emit("ARMZ 1,%d",limite);
@@ -746,7 +814,7 @@ static void for_cmd(void){
  * <whle> ::= "sWHILE" "(" <expr> ")" "sDO" {<cmd> ";"} "sEND"
  * Gabarito: Linicio: expr / DSVF Lfim / cmds / DSVS Linicio / Lfim:
  */
-static void while_cmd(void){
+static int while_cmd(void){
     int begin,end;
     TipoSimbolo t;
     entrar("whle");
@@ -756,15 +824,17 @@ static void while_cmd(void){
     end=gen_new_label();
     gen_label(begin);
     t=expr();
+    int sempre_verdadeira = constante.conhecido && constante.valor;
     exige(t,TS_LOGIC,atual.linha);
     consumir(sFECHAPAR);
     consumir(sDO);
     gen_emit("DSVF L%d",end);
-    cmds();
+    int corpo_retorna = cmds();
     consumir(sEND);
     gen_emit("DSVS L%d",begin);
     gen_label(end);
     sair("whle");
+    return sempre_verdadeira && corpo_retorna;
 }
 /*
  * <rept> ::= "sREPEAT" {<cmd> ";"} "sUNTIL" "(" <expr> ")"
@@ -858,7 +928,7 @@ static int cmd(void){
         break;
         case sFOR:for_cmd();
         break;
-        case sWHILE:while_cmd();
+        case sWHILE:guaranteed=while_cmd();
         break;
         case sREPEAT:guaranteed=repeat_cmd();
         break;
