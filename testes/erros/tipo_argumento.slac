@@ -1,0 +1,12 @@
+# erro esperado: argumento de tipo errado (logic no lugar de int)
+proc p(x: int)
+start
+ echo(x);
+end
+proc main()
+locvars
+ ok is logic;
+start
+ ok << 1 = 1;
+ p(ok);
+end

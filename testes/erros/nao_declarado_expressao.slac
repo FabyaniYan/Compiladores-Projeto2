@@ -1,0 +1,7 @@
+# erro esperado: identificador nao declarado dentro de expressao
+proc main()
+locvars
+ a is int;
+start
+ a << b + 1;
+end

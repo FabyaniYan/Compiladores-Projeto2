@@ -10,14 +10,12 @@ typedef struct { const char *texto; CategoriaToken categoria; } PalavraReservada
 /*tabela das palavras reservadas da linguagem*/
 static const PalavraReservada palavras[] = {
     {"globvars", sGLOBVARS}, {"locvars", sLOCVARS}, {"is", sKIND},
-    {"int", sINT}, {"logic", sLOGIC}, {"chr", sCHR}, {"proc", sPROC},
+    {"int", sINT}, {"logic", sLOGIC}, {"chr", sCHR}, {"str", sSTR}, {"proc", sPROC},
     {"func", sFUNC}, {"ref", sREF}, {"start", sSTART}, {"end", sEND},
     {"echo", sECHO}, {"get", sGET}, {"case", sCASE}, {"otherwise", sOTHERWISE},
     {"choose", sCHOOSE}, {"match", sMATCH}, {"others", sOTHERS},
     {"for", sFOR}, {"from", sFROM}, {"to", sTO}, {"by", sBY}, {"do", sDO},
     {"while", sWHILE}, {"repeat", sREPEAT}, {"until", sUNTIL}, {"return", sRETURN}
-    /* PESSOA 1: */
-    /* acrescentar a palavra reservada {"str", sSTR} nesta tabela (Fase 2) */
 };
 
 static int ler(Lex *lex) {
@@ -107,29 +105,37 @@ Token lex_next(Lex *lex) {
         return token(sCTEINT, buf, linha);
     }
 
-    if (c == '"') {
-        /*le uma string entre aspas duplas*/
+    if (c == '"' || c == '\'') {
+        int aspas = c;
         ler(lex);
-        while (lex->proximo != EOF && lex->proximo != '"' && lex->proximo != '\n') {
-            if (n + 1 >= sizeof(buf)) return erro(lex, linha, "string muito longa na linha %d", linha);
-            buf[n++] = (char)ler(lex);
+        while (lex->proximo != EOF && lex->proximo != aspas && lex->proximo != '\n') {
+            int value;
+            if (n + 1 >= sizeof(buf)) return erro(lex, linha, "literal muito longo na linha %d", linha);
+            value = ler(lex);
+            if (value == '\\') {
+                switch (lex->proximo) {
+                    case 'n': value = '\n'; break;
+                    case 'r': value = '\r'; break;
+                    case 't': value = '\t'; break;
+                    case '0': value = 0; break;
+                    case '\\': value = '\\'; break;
+                    case '\'': value = '\''; break;
+                    case '"': value = '"'; break;
+                    default: return erro(lex, linha, "sequencia de escape invalida");
+                }
+                ler(lex);
+            }
+            if (value == 0) return erro(lex, linha, "NUL nao suportado em literais");
+            buf[n++] = (char)value;
         }
-        if (lex->proximo != '"') return erro(lex, linha, "string sem fechamento na linha %d", linha);
+        if (lex->proximo != aspas) return erro(lex, linha, "literal sem fechamento na linha %d", linha);
         ler(lex);
         buf[n] = '\0';
+        if (aspas == '\'') {
+            if (n != 1 && !(n==2 && ((unsigned char)buf[0]&0xE0)==0xC0 && ((unsigned char)buf[1]&0xC0)==0x80) && !(n==3 && ((unsigned char)buf[0]&0xF0)==0xE0 && ((unsigned char)buf[1]&0xC0)==0x80 && ((unsigned char)buf[2]&0xC0)==0x80) && !(n==4 && ((unsigned char)buf[0]&0xF8)==0xF0 && ((unsigned char)buf[1]&0xC0)==0x80 && ((unsigned char)buf[2]&0xC0)==0x80 && ((unsigned char)buf[3]&0xC0)==0x80)) return erro(lex, linha, "constante caractere invalida na linha %d", linha);
+            return token(sCTECHAR, buf, linha);
+        }
         return token(sSTRING, buf, linha);
-    }
-
-    if (c == '\'') {
-        /*le um unico caractere entre aspas simples*/
-        ler(lex);
-        if (lex->proximo == EOF || lex->proximo == '\n' || lex->proximo == '\'')
-            return erro(lex, linha, "constante caractere invalida na linha %d", linha);
-        buf[0] = (char)ler(lex);
-        buf[1] = '\0';
-        if (lex->proximo != '\'') return erro(lex, linha, "constante caractere invalida na linha %d", linha);
-        ler(lex);
-        return token(sCTECHAR, buf, linha);
     }
 
     ler(lex);

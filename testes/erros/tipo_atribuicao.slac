@@ -1,0 +1,7 @@
+# erro esperado: atribuir logic a variavel int
+proc main()
+locvars
+ a is int;
+start
+ a << 1 < 2;
+end

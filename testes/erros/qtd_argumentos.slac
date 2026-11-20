@@ -1,0 +1,9 @@
+# erro esperado: numero errado de argumentos
+proc p(x: int)
+start
+ echo(x);
+end
+proc main()
+start
+ p(1, 2);
+end

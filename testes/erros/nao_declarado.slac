@@ -1,0 +1,5 @@
+# erro esperado: nao declarado
+proc main()
+start
+ x << 1;
+end

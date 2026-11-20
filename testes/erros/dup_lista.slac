@@ -1,0 +1,6 @@
+# erro esperado: nome repetido na mesma declaracao
+proc main()
+locvars
+ a, b, a is int;
+start
+end

@@ -1,0 +1,7 @@
+# erro esperado: chamada de funcao que nao existe
+proc main()
+locvars
+ a is int;
+start
+ a << f(2);
+end

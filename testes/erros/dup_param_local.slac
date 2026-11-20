@@ -1,0 +1,9 @@
+# erro esperado: parametro e variavel local com o mesmo nome
+proc p(x: int)
+locvars
+ x is int;
+start
+end
+proc main()
+start
+end

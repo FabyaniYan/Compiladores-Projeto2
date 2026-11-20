@@ -1,0 +1,11 @@
+func fat(n:int):int
+start
+ case(n <= 1)
+    return 1;
+ end;
+ return n * fat(n-1);
+end
+proc main()
+start
+ echo(fat(5));
+end

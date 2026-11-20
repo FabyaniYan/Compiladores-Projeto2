@@ -1,0 +1,54 @@
+# Usa globvars, vetor, str, ref, func, for com passo negativo, repeat, choose e case.
+# Saida esperada: ola / 2 / 10 / 0 / 10 / 3 / 3 / S
+globvars
+ total is int;
+ v is int[5];
+proc zera(ref w: int[5], n: int)
+locvars
+ i is int;
+start
+ for i from 1 to n do
+   w[i] << 0;
+ end;
+end
+proc soma(ref r: int, x: int)
+start
+ r << r + x;
+end
+func dobro(x: int): int
+start
+ return x * 2;
+end
+proc main()
+locvars
+ i, c is int;
+ s is str;
+start
+ s << "ola";
+ echo(s);
+ for i from 5 to 1 by -1 do
+   v[i] << dobro(i);
+ end;
+ echo(v[1], v[5]);
+ zera(v, 5);
+ echo(v[3]);
+ total << 0;
+ soma(total, 7);
+ soma(total, 3);
+ echo(total);
+ c << 0;
+ repeat
+   c << c + 1;
+ until (c >= 3);
+ echo(c);
+ choose (c)
+   match 1, 2 -> echo(12);
+   match 3 -> echo(3);
+   others -> echo(0);
+ end;
+ case (~(c = 3) | -c < 0 & c // 2 = 1)
+   echo('S');
+ otherwise
+   echo('N');
+ end;
+end

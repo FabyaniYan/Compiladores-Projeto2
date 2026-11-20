@@ -1,9 +1,9 @@
-# COMPLAC - Compilador para SLAC² (Fase 2)
+# COMPLAC — Compilador SLAC² (Projeto 2)
 
-Projeto da disciplina de Compiladores (Mackenzie, 6ª etapa).
+Projeto da disciplina de Compiladores (Universidade Presbiteriana Mackenzie, 6ª etapa).
 
-Esta entrega corresponde à **Fase 2**: análise semântica e geração de código
-para a MEPA, feitas durante a análise sintática (Tradução Dirigida a Sintaxe).
+Compilador completo em C99 para a linguagem SLAC²: análise léxica, sintática (ASDR)
+e semântica, com geração de código para a MEPA por Tradução Dirigida a Sintaxe.
 
 ## Integrantes
 
@@ -12,62 +12,80 @@ para a MEPA, feitas durante a análise sintática (Tradução Dirigida a Sintaxe
 | Fabyani Tiva Yan | 10431835 |
 | Bruna Amorim Maia | 10431883 |
 
+## Estrutura
+
+```
+.
+├── Makefile
+├── README.md
+├── main.c   opt.c/.h   log.c/.h   diag.c/.h
+├── lex.c/.h          analisador léxico
+├── parser.c/.h       ASDR + semântica + emissão MEPA
+├── symtab.c/.h       tabela de símbolos (hash por escopo)
+├── gerador.c/.h      instruções MEPA e rótulos
+└── testes/
+    ├── exemplos/     programas válidos (geram .mepa)
+    ├── erros/        programas com erro intencional
+    └── *.py          bateria automática (make teste)
+```
+
 ## Compilação
 
 ```bash
-make          # gera o binario complac (-Wall -Wextra -std=c99)
-make clean    # remove objetos, binario, logs e .mepa dos testes
+make          # gera o binário complac (gcc -Wall -Wextra -std=c99, sem warnings)
+make clean    # remove objetos, binário, logs e .mepa
 ```
 
 ## Execução
 
 ```bash
 ./complac <arquivo.slac> [--tokens] [--symtab] [--trace]
+python3 mepa.py --progfile <arquivo.mepa> --silent
 ```
 
-Sempre gera `<fonte>.mepa` ao lado do fonte. As opções geram os mesmos logs da Fase 1
-(`.tk`, `.ts`, `.trc`).
+- O compilador sempre gera `<fonte>.mepa`, ao lado do fonte, quando não há erro.
+- `--tokens`, `--symtab` e `--trace` geram os logs `.tk`, `.ts` e `.trc` (combináveis, em qualquer ordem).
+- Erro: mensagem `<fonte>:<linha>: erro: <mensagem>` no stderr e retorno 1; nenhum `.mepa` é gerado.
 
-Para executar o código gerado no interpretador fornecido:
+## Testes
 
 ```bash
-python3 mepa.py --progfile testes/enunciado_fig1.mepa
+make exemplos                               # compila testes/exemplos e testes/erros
+make teste                                  # bateria automática (64 casos)
+make teste MEPA=/caminho/para/mepa.py       # se o interpretador estiver em outro lugar
 ```
 
-<!-- PESSOA 1: -->
-<!-- conferir se os codigos de retorno (0 sucesso / 1 erro) e o formato da mensagem de erro continuam iguais -->
-
-## Módulos
-
-| Módulo | Responsabilidade | Interface pública |
-|---|---|---|
-| `main` | Orquestra a execução | — |
-| `opt` | Linha de comando | `opts_parse`, `opts_get` |
-| `lex` | Analisador léxico | `lex_next` |
-| `parser` | ASDR + semântica + emissão MEPA | `parse_program` |
-| `symtab` | Tabela de símbolos (hash com níveis de escopo) | `ts_insert`, `ts_lookup` |
-| `gerador` | Escrita do `.mepa` e rótulos | `gera_instr_mepa`, `novo_rotulo` |
-| `diag` | Mensagens de erro e rastreamento | `diag_error`, `diag_info` |
-| `log` | Arquivos `.tk`, `.ts`, `.trc` | `log_token`, `log_simbolo`, `log_trace` |
+O interpretador do professor não faz parte do repositório; por padrão o `make teste`
+procura em `../mepa_vm/mepa.py`. A bateria compara a saída real do interpretador com a
+esperada: chamadas, retorno, recursão, entrada, vetores, referência, strings, `case`,
+`choose`, `for`, `while`, `repeat`, operadores e mensagens de erro.
 
 ## Verificações semânticas
 
-<!-- PESSOA 1: -->
-<!-- listar o que foi implementado em unicidade e escopo (casos de duplicata cobertos) -->
+| Verificação | Exemplo em `testes/erros` |
+|---|---|
+| Declaração prévia | `nao_declarado`, `nao_declarado_expressao` |
+| Sub-rotina inexistente | `rotina_inexistente`, `funcao_inexistente` |
+| Unicidade no mesmo escopo | `erro_duplicado`, `dup_lista`, `dup_param_local`, `dup_subrotina`, `dup_global_subrotina` |
+| Checagem de tipos | `tipo_atribuicao` |
+| Quantidade e tipo de parâmetros | `qtd_argumentos`, `tipo_argumento` |
 
-<!-- PESSOA 2: -->
-<!-- listar declaracao previa, checagem de tipos (regras por operador) e validacao de parametros -->
+Sombreamento em escopos diferentes (variável local com o nome de uma global) é permitido.
 
-## Geração de código
+## Geração de código (MEPA)
 
-<!-- PESSOA 1: -->
-<!-- explicar layout de memoria: globais e locais do main no nivel 0, sub-rotinas no nivel 1, -->
-<!-- parametros em -5, -6..., retorno de func, vetor com n+1 posicoes, str com 256 -->
+- Programa: `INPP`, `AMEM` das globais, `DSVS` para a entrada, sub-rotinas, `CHPR` do `main`, `DMEM`, `PARA`, `FIM`.
+- Sub-rotinas: `ENPR 1` / `AMEM` dos locais / corpo / `DMEM` / `RTPR n`. Parâmetros em endereços
+  negativos (o último em -5); o retorno de função fica na posição reservada pelo chamador (`AMEM 1`).
+- Vetores: `n+1` posições (a posição 0 guarda o tamanho; elementos de 1 a n), acesso com `INDX 1`.
+- `str`: 256 células (comprimento + até 255 caracteres), com `CRST`, `CRVM`, `ARVM` e `IMPS`.
+- Desvios com rótulos `Ln: NADA`, `DSVF` e `DSVS`, seguindo os gabaritos de `if`/`while` da aula.
 
-<!-- PESSOA 2: -->
-<!-- mostrar o gabarito de cada comando (case, choose, for, while, repeat, echo, get) -->
+## Limitações conhecidas
 
-## Particularidades
-
-<!-- AS DUAS: -->
-<!-- decisoes que nao estao claras na especificacao (ex.: echo pula linha?, str por referencia?) -->
+- Exige ao menos um `return` em cada `func`, mas não verifica todos os caminhos.
+- Índice de vetor dado por variável não tem checagem de limite em tempo de execução
+  (índice constante fora de 1..n é erro de compilação).
+- Não implementado: atribuição de vetor inteiro, comparação entre vetores/strings e `get` de `str`.
+- Chamar uma sub-rotina antes de declará-la é erro (declaração prévia).
+- No `echo`, inteiros (`IMPR`) e caracteres (`IMPC`) quebram linha; strings (`IMPS`) não.

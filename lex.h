@@ -3,12 +3,12 @@
 
 #include <stdio.h>
 
-#define TOKEN_LEXEMA_MAX 256
+#define TOKEN_LEXEMA_MAX 1024
 
 typedef enum {
     sEOF, sERRO,
     sIDENTIF, sCTEINT, sSTRING, sCTECHAR,
-    sGLOBVARS, sLOCVARS, sKIND, sINT, sLOGIC, sCHR, sSTR, /*sSTR: novo tipo str (Fase 2)*/
+    sGLOBVARS, sLOCVARS, sKIND, sINT, sLOGIC, sCHR, sSTR,
     sPROC, sFUNC, sREF, sSTART, sEND, sECHO, sGET,
     sCASE, sOTHERWISE, sCHOOSE, sMATCH, sOTHERS,
     sFOR, sFROM, sTO, sBY, sDO, sWHILE, sREPEAT, sUNTIL, sRETURN,

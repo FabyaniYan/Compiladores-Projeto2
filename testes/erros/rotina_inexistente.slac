@@ -1,0 +1,5 @@
+# erro esperado: rotina inexistente
+proc main()
+start
+ foo();
+end

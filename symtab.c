@@ -4,20 +4,28 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
+
+#define TS_HASH_BUCKETS 257
 
 /*
- * Organizacao interna (Fase 2):
- *   - os simbolos continuam guardados em um vetor (simbolos[]), na ordem
- *     de insercao; isso mantem ts_get, ts_set_* e ts_dump funcionando;
- *   - a tabela hash (baldes[]) guarda, para cada balde, o indice do
- *     primeiro simbolo; os demais sao encadeados pelo campo "proximo".
+ * Tabela hash: um conjunto de baldes por escopo. Cada balde guarda o indice
+ * do primeiro simbolo; os demais sao encadeados por proximo_hash.
+ * Os simbolos continuam no vetor simbolos[], na ordem de insercao (relatorio .ts).
  */
+static int buckets[TS_MAX_ESCOPOS][TS_HASH_BUCKETS];
+static int proximo_hash[TS_MAX_SIMBOLOS];
+
+/*funcao hash FNV-1a*/
+static unsigned hash_nome(const char *nome) {
+    unsigned long h = 2166136261u;
+    for (; *nome; nome++) { h ^= (unsigned char)*nome; h *= 16777619u; }
+    return (unsigned)(h % TS_HASH_BUCKETS);
+}
 
 typedef struct {
     char nome[TS_MAX_NOME]; /*nome completo do escopo, ex.: "proc:main.locals"*/
     int pai;                /*indice do escopo pai; -1 para o global*/
-    int nivel;              /*nivel lexico MEPA*/
-    int memoria;            /*posicoes ja ocupadas pelas variaveis deste escopo*/
 } Escopo;
 
 static Simbolo simbolos[TS_MAX_SIMBOLOS];
@@ -27,23 +35,16 @@ static Escopo escopos[TS_MAX_ESCOPOS];
 static int total_escopos = 0;
 static int escopo_ativo = 0;
 
-static int baldes[TS_TAM_HASH]; /*indice do primeiro simbolo de cada balde; -1 = vazio*/
-
-/* ------------------------------------------------------------------ */
-/* Funcao de espalhamento                                              */
-/* ------------------------------------------------------------------ */
-
-static unsigned int hash(const char *lexema) __attribute__((unused));
-static unsigned int hash(const char *lexema) {
-    /* PESSOA 1: */
-    /* implementar a funcao hash (ex.: djb2: h = h*33 + c) e devolver h % TS_TAM_HASH */
-    (void)lexema;
-    return 0;
+/*procura o nome so dentro de um escopo, percorrendo um unico balde*/
+static int buscar_no_escopo(const char *nome, int escopo) {
+    int i = buckets[escopo][hash_nome(nome)];
+    while (i >= 0) {
+        if (strcmp(simbolos[i].lexema, nome) == 0) return i;
+        i = proximo_hash[i];
+    }
+    return -1;
 }
 
-/* ------------------------------------------------------------------ */
-/* Escopos                                                             */
-/* ------------------------------------------------------------------ */
 
 void ts_init(void) {
     total_simbolos = 0;
@@ -51,29 +52,21 @@ void ts_init(void) {
     escopo_ativo = 0;
     snprintf(escopos[0].nome, TS_MAX_NOME, "global");
     escopos[0].pai = -1;
-    escopos[0].nivel = 0;
-    escopos[0].memoria = 0;
-
-    /* PESSOA 1: */
-    /* inicializar todos os baldes[] com -1 (tabela hash vazia) */
-    (void)baldes;
+    for (int e = 0; e < TS_MAX_ESCOPOS; e++)
+        for (int b = 0; b < TS_HASH_BUCKETS; b++) buckets[e][b] = -1;
 }
 
-void ts_abre_escopo(const char *nome, int nivel) {
+void ts_abre_escopo(const char *nome) {
     int novo;
 
     if (total_escopos >= TS_MAX_ESCOPOS)
         diag_error(0, "limite de escopos da tabela de simbolos excedido");
 
     novo = total_escopos++;
+    /*o nome ja chega pronto (ex.: "proc:main.block#1"); aqui so guardamos a cadeia*/
     snprintf(escopos[novo].nome, TS_MAX_NOME, "%s", nome);
     escopos[novo].pai = escopo_ativo;
-    escopos[novo].nivel = nivel;
-    escopos[novo].memoria = 0;
     escopo_ativo = novo;
-
-    /* PESSOA 1: */
-    /* conferir se o bloco start...end deve herdar a memoria/nivel do escopo .locals */
 }
 
 void ts_fecha_escopo(void) {
@@ -82,41 +75,45 @@ void ts_fecha_escopo(void) {
 
 const char *ts_escopo_atual(void) { return escopos[escopo_ativo].nome; }
 
-int ts_nivel_atual(void) { return escopos[escopo_ativo].nivel; }
-
-/* ------------------------------------------------------------------ */
-/* Insercao e busca                                                    */
-/* ------------------------------------------------------------------ */
-
 int ts_lookup_local(const char *lexema) {
-    /* PESSOA 1: */
-    /* percorrer so o balde hash(lexema), seguindo "proximo", e devolver o indice */
-    /* do simbolo com esse lexema que pertenca ao escopo_ativo; -1 se nao achar */
-    (void)lexema;
-    return -1;
+    return buscar_no_escopo(lexema, escopo_ativo);
 }
 
 int ts_lookup(const char *lexema) {
-    /* PESSOA 1: */
-    /* para cada escopo da cadeia (escopo_ativo -> pai -> ... -> global), procurar no */
-    /* balde hash(lexema) um simbolo daquele escopo; devolver o primeiro achado (o mais interno) */
-    /* -1 se nao achar (quem chama decide se e erro "nao declarado") */
-    (void)lexema;
+    for (int e = escopo_ativo; e >= 0; e = escopos[e].pai) {
+        int i = buscar_no_escopo(lexema, e);
+        if (i >= 0) return i;
+    }
     return -1;
 }
 
 int ts_insert(const char *lexema, CategoriaSimbolo cat, TipoSimbolo tipo,
               int extra, int linha) {
-    /* PESSOA 1: */
-    /* 1. UNICIDADE: se ts_lookup_local(lexema) >= 0 -> diag_error "ja declarado no escopo" */
-    /* 2. UNICIDADE: sub-rotina com nome igual a variavel global (e vice-versa) -> erro */
-    /* 3. preencher simbolos[total_simbolos] (lexema, cat, tipo, escopo, extra, nivel) */
-    /* 4. calcular tamanho com ts_tamanho_tipo e endereco = escopos[escopo_ativo].memoria */
-    /*    (parametros e sub-rotinas nao ocupam memoria do escopo; somar so para variaveis) */
-    /* 5. encadear no inicio do balde: proximo = baldes[h]; baldes[h] = indice */
-    /* 6. devolver o indice */
-    (void)lexema; (void)cat; (void)tipo; (void)extra; (void)linha;
-    return -1;
+    int i;
+
+    /*a linguagem nao admite dois identificadores iguais no mesmo escopo*/
+    if (ts_lookup_local(lexema) >= 0)
+        diag_error(linha, "identificador \"%s\" ja declarado no escopo %s",
+                   lexema, escopos[escopo_ativo].nome);
+
+    if (total_simbolos >= TS_MAX_SIMBOLOS)
+        diag_error(linha, "limite de simbolos da tabela excedido");
+
+    i = total_simbolos++;
+    snprintf(simbolos[i].lexema, TOKEN_LEXEMA_MAX, "%s", lexema);
+    simbolos[i].categoria = cat;
+    simbolos[i].tipo = tipo;
+    simbolos[i].escopo = escopo_ativo;
+    simbolos[i].extra = extra;
+    simbolos[i].endereco = 0;
+    simbolos[i].nivel = 0;
+    simbolos[i].label = 0;
+
+    /*encadeia no inicio do balde do escopo atual*/
+    unsigned h = hash_nome(lexema);
+    proximo_hash[i] = buckets[escopo_ativo][h];
+    buckets[escopo_ativo][h] = i;
+    return i;
 }
 
 const Simbolo *ts_get(int indice) {
@@ -131,47 +128,6 @@ void ts_set_extra(int indice, int extra) {
 void ts_set_tipo(int indice, TipoSimbolo tipo) {
     if (indice >= 0 && indice < total_simbolos) simbolos[indice].tipo = tipo;
 }
-
-void ts_set_rotulo(int indice, const char *rotulo) {
-    /* PESSOA 1: */
-    /* copiar o rotulo para simbolos[indice].rotulo (com snprintf), validando o indice */
-    (void)indice; (void)rotulo;
-}
-
-/* ------------------------------------------------------------------ */
-/* Parametros e memoria                                                */
-/* ------------------------------------------------------------------ */
-
-void ts_add_param(int indice_sub, TipoSimbolo tipo, int por_referencia) {
-    /* PESSOA 1: */
-    /* gravar tipo e ref em tipos_param[qtd_param] / ref_param[qtd_param] e incrementar qtd_param */
-    /* (diag_error se passar de TS_MAX_PARAMS) */
-    (void)indice_sub; (void)tipo; (void)por_referencia;
-}
-
-void ts_ajusta_enderecos_param(int indice_sub) {
-    /* PESSOA 1: */
-    /* percorrer os parametros do escopo atual na ordem de declaracao e definir: */
-    /* endereco do i-esimo = -(qtd_param - i + 4)  ->  ultimo = -5, penultimo = -6 ... */
-    /* (funcao: o valor de retorno fica em -(qtd_param + 5)) */
-    (void)indice_sub;
-}
-
-int ts_memoria_escopo(void) {
-    return escopos[escopo_ativo].memoria;
-}
-
-int ts_tamanho_tipo(TipoSimbolo tipo, int tamanho_vetor) {
-    /* PESSOA 1: */
-    /* int/logic/chr = 1; vetor = tamanho_vetor + 1 (posicao 0 guarda o comprimento); */
-    /* str = TS_TAM_STR */
-    (void)tipo; (void)tamanho_vetor;
-    return 1;
-}
-
-/* ------------------------------------------------------------------ */
-/* Relatorios (ja prontos desde a Fase 1)                              */
-/* ------------------------------------------------------------------ */
 
 const char *ts_nome_categoria(CategoriaSimbolo cat) {
     switch (cat) {
@@ -190,12 +146,11 @@ const char *ts_nome_tipo(TipoSimbolo tipo) {
         case TS_INT:       return "int";
         case TS_LOGIC:     return "logic";
         case TS_CHR:       return "chr";
-        case TS_STR:       return "str";
         case TS_INT_VET:   return "int[]";
         case TS_LOGIC_VET: return "logic[]";
         case TS_CHR_VET:   return "chr[]";
         case TS_VOID:      return "void";
-        case TS_INDEF:     return "indef";
+        case TS_STR:       return "str";
         default:           return "?";
     }
 }
@@ -211,4 +166,15 @@ void ts_dump(void) {
                             ts_nome_categoria(simbolos[i].categoria),
                             ts_nome_tipo(simbolos[i].tipo),
                             simbolos[i].extra);
+}
+
+void ts_set_addr(int i, int addr, int nivel) {
+    if (i >= 0 && i < total_simbolos) {
+        simbolos[i].endereco = addr;
+        simbolos[i].nivel = nivel;
+    }
+}
+
+void ts_set_label(int i, int label) {
+    if (i >= 0 && i < total_simbolos) simbolos[i].label = label;
 }

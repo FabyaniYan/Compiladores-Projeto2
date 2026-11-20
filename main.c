@@ -1,6 +1,6 @@
 /*
  * COMPLAC - compilador para a linguagem SLAC2
- * Fase 2: analise lexica, sintatica e semantica + geracao de codigo MEPA.
+ * Projeto 2: analise lexica/sintatica/semantica e geracao de codigo MEPA.
  *
  * Este modulo apenas orquestra a execucao: interpreta a linha de comando,
  * abre o arquivo fonte, inicializa os demais modulos, dispara a analise e
@@ -8,12 +8,12 @@
  */
 
 #include "diag.h"
-#include "gerador.h"
 #include "lex.h"
 #include "log.h"
 #include "opt.h"
 #include "parser.h"
 #include "symtab.h"
+#include "gerador.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,29 +46,22 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /*arquivo de saida <fonte>.mepa (sempre gerado, nao depende de opcao)*/
-    if (!ger_abrir(opcoes->arquivo_fonte)) {
-        fprintf(stderr, "nao foi possivel criar o arquivo .mepa\n");
-        log_fechar();
-        fclose(fonte);
-        return EXIT_FAILURE;
-    }
-
     if (!lex_init(&lex, fonte)) {
         fprintf(stderr, "falha ao inicializar o analisador lexico\n");
-        ger_descartar();
         log_fechar();
         fclose(fonte);
         return EXIT_FAILURE;
     }
 
-    /*4. analise + geracao de codigo: o parser consome os tokens do lex sob demanda
-         e, enquanto reconhece cada estrutura, chama o gerador (SDT)*/
+    /*4. analise + geracao: o parser consome os tokens do lex sob demanda e
+         acumula as instrucoes MEPA; o .mepa so e gravado se nao houver erro*/
+    gen_reset();
+    gen_invalidate(opcoes->arquivo_fonte);
     parse_program(&lex);
+    gen_save(opcoes->arquivo_fonte);
 
     /*5. relatorios e encerramento ordenado*/
     ts_dump();
-    ger_fechar();
     log_fechar();
     fclose(fonte);
 

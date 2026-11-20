@@ -1,0 +1,11 @@
+func quad(x:int):int
+start
+    return x*x;
+end
+proc main()
+locvars
+    numero is int;
+start
+    numero << 5;
+    echo(quad(numero));
+end

@@ -1,5 +1,4 @@
 #include "diag.h"
-#include "gerador.h"
 #include "log.h"
 
 #include <stdarg.h>
@@ -23,7 +22,6 @@ void diag_error(int linha, const char *formato, ...) {
 
     /*erro interrompe o processamento: fecha os logs e encerra*/
     log_fechar();
-    ger_descartar(); /*nao deixa um .mepa incompleto para tras*/
     exit(EXIT_FAILURE);
 }
 

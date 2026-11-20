@@ -1,0 +1,10 @@
+# erro esperado: duas sub-rotinas com o mesmo nome
+proc a()
+start
+end
+proc a()
+start
+end
+proc main()
+start
+end

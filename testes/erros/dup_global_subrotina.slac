@@ -1,0 +1,9 @@
+# erro esperado: variavel global e sub-rotina com o mesmo nome
+globvars
+ a is int;
+proc a()
+start
+end
+proc main()
+start
+end

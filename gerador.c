@@ -1,67 +1,89 @@
 #include "gerador.h"
+#include "diag.h"
 
+#include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define GER_MAX_CAMINHO 512
-#define GER_MAX_ROTULOS 4096
-#define GER_TAM_ROTULO  16
+#define MAX_LINES 100000
+#define MAX_PATH_MEPA 2048
 
-static FILE *arq_mepa = NULL;
-static char caminho_mepa[GER_MAX_CAMINHO];
-static int contador_rotulos = 0;
-static char rotulos[GER_MAX_ROTULOS][GER_TAM_ROTULO]; /*guarda os rotulos ja criados*/
+static char *lines[MAX_LINES]; /*instrucoes ja emitidas, na ordem*/
+static int count;              /*quantidade de instrucoes*/
+static int labels;             /*ultimo rotulo criado*/
 
-int ger_abrir(const char *arquivo_fonte) {
-    /* PESSOA 1: */
-    /* montar caminho_mepa trocando a extensao do fonte por .mepa */
-    /* (mesma logica de troca_extensao do log.c) e abrir com fopen(..., "w") */
-    /* zerar contador_rotulos; devolver 1 se abriu, 0 se falhou */
-    (void)arquivo_fonte;
-    (void)caminho_mepa;
-    return 1;
+/*monta <fonte-sem-extensao>.mepa em path*/
+static void caminho_mepa(char *path, const char *source) {
+    const char *slash = strrchr(source, '/');
+    const char *dot = strrchr(source, '.');
+    size_t len = strlen(source);
+
+    if (dot && (!slash || dot > slash)) len = (size_t)(dot - source);
+    if (len + 6 >= MAX_PATH_MEPA) diag_error(0, "caminho de saida muito longo");
+    memcpy(path, source, len);
+    strcpy(path + len, ".mepa");
 }
 
-void gera_instr_mepa(const char *rotulo, const char *mnemonico,
-                     const char *parametro1, const char *parametro2) {
-    /* PESSOA 1: */
-    /* se arq_mepa == NULL, nao faz nada */
-    /* com rotulo: escrever "L1:" alinhado na coluna 0; sem rotulo: recuar com espacos */
-    /* escrever o mnemonico; se houver parametro1, " p1"; se houver parametro2, ",p2" SEM espaco */
-    /* terminar com '\n' */
-    (void)rotulo; (void)mnemonico; (void)parametro1; (void)parametro2;
+void gen_reset(void) {
+    count = 0;
+    labels = 0;
 }
 
-void gera_instr_int(const char *rotulo, const char *mnemonico, int qtd_params,
-                    int parametro1, int parametro2) {
-    /* PESSOA 1: */
-    /* chamar gera_instr_mepa usando int2str nos parametros (0, 1 ou 2 parametros) */
-    (void)rotulo; (void)mnemonico; (void)qtd_params; (void)parametro1; (void)parametro2;
+void gen_emit(const char *fmt, ...) {
+    char buf[2048];
+    va_list args;
+    size_t n;
+
+    if (count >= MAX_LINES) diag_error(0, "limite de instrucoes MEPA excedido");
+
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    n = strlen(buf) + 1;
+    lines[count] = malloc(n);
+    if (!lines[count]) diag_error(0, "memoria insuficiente no gerador");
+    memcpy(lines[count], buf, n);
+    count++;
 }
 
-const char *novo_rotulo(void) {
-    /* PESSOA 1: */
-    /* incrementar contador_rotulos e escrever "L<n>" em rotulos[contador_rotulos] */
-    /* devolver rotulos[contador_rotulos] (cada rotulo tem buffer proprio) */
-    (void)rotulos;
-    return "L0";
+int gen_new_label(void) { return ++labels; }
+
+void gen_label(int n) { gen_emit("L%d: NADA", n); }
+
+void gen_invalidate(const char *source) {
+    char path[MAX_PATH_MEPA];
+    caminho_mepa(path, source);
+    /*se o arquivo nao existir, remove falha e tudo bem; erros de acesso aparecem em gen_save*/
+    remove(path);
 }
 
-const char *int2str(int valor) {
-    /* PESSOA 1: */
-    /* usar um buffer rotativo (ex.: static char buf[4][16] e um indice que gira) */
-    /* para permitir gera_instr_mepa(NULL, "CRVL", int2str(0), int2str(3)) */
-    (void)valor;
-    return "0";
-}
+void gen_save(const char *source) {
+    char path[MAX_PATH_MEPA];
+    FILE *f;
+    int i;
 
-void ger_fechar(void) {
-    /* PESSOA 1: */
-    /* escrever a linha "FIM", fechar arq_mepa e zerar o ponteiro */
-    (void)arq_mepa; (void)contador_rotulos;
-}
+    caminho_mepa(path, source);
+    f = fopen(path, "w");
+    if (!f) diag_error(0, "nao foi possivel criar o arquivo .mepa");
 
-void ger_descartar(void) {
-    /* PESSOA 1: */
-    /* fechar arq_mepa (se aberto) e apagar o arquivo com remove(caminho_mepa) */
+    for (i = 0; i < count; i++)
+        if (fprintf(f, "%s\n", lines[i]) < 0) {
+            fclose(f);
+            remove(path);
+            diag_error(0, "falha ao gravar MEPA");
+        }
+
+    if (fprintf(f, "FIM\n") < 0 || fclose(f) != 0) {
+        remove(path);
+        diag_error(0, "falha ao finalizar MEPA");
+    }
+
+    /*libera a memoria das instrucoes*/
+    for (i = 0; i < count; i++) {
+        free(lines[i]);
+        lines[i] = NULL;
+    }
+    count = 0;
 }
