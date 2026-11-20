@@ -1,0 +1,5 @@
+# PESSOA 1:
+# escrever um programa com nome repetido na mesma linha de declaracao, ex.: a, b, a is int; (deve dar erro)
+proc main()
+start
+end

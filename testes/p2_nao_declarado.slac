@@ -1,0 +1,5 @@
+# PESSOA 2:
+# escrever um programa que usa variavel nao declarada numa atribuicao/expressao (deve dar erro)
+proc main()
+start
+end

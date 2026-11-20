@@ -1,0 +1,5 @@
+# PESSOA 2:
+# escrever um programa que chama sub-rotina com numero errado de argumentos (deve dar erro)
+proc main()
+start
+end

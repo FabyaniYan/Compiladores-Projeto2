@@ -1,0 +1,5 @@
+# PESSOA 1:
+# escrever um programa com variavel global e sub-rotina de mesmo nome (deve dar erro de duplicata)
+proc main()
+start
+end

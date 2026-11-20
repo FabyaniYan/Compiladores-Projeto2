@@ -1,0 +1,5 @@
+# PESSOA 1:
+# escrever um programa VALIDO com proc e func com parametros (valor e ref) e return; conferir ENPR/RTPR/CHPR rodando no interpretador
+proc main()
+start
+end

@@ -1,0 +1,5 @@
+# PESSOA 2:
+# escrever um programa que chama sub-rotina que nao existe (deve dar erro)
+proc main()
+start
+end
