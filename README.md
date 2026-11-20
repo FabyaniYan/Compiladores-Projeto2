@@ -51,7 +51,7 @@ python3 mepa.py --progfile <arquivo.mepa> --silent
 
 ```bash
 make exemplos                               # compila testes/exemplos e testes/erros
-make teste                                  # bateria automática (64 casos)
+make teste                                  # bateria automática (75 casos)
 make teste MEPA=/caminho/para/mepa.py       # se o interpretador estiver em outro lugar
 ```
 
@@ -59,6 +59,8 @@ O interpretador do professor não faz parte do repositório; por padrão o `make
 procura em `../mepa_vm/mepa.py`. A bateria compara a saída real do interpretador com a
 esperada: chamadas, retorno, recursão, entrada, vetores, referência, strings, `case`,
 `choose`, `for`, `while`, `repeat`, operadores e mensagens de erro.
+Os testes adicionais conferem dimensões de vetores, limites de índices variáveis e
+retornos de funções em diferentes caminhos de execução.
 
 ## Verificações semânticas
 

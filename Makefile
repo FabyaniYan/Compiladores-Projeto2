@@ -35,6 +35,7 @@ teste: $(ALVO)
 	python3 testes/testes_regressao.py
 	python3 testes/testes_mepa.py
 	python3 testes/testes_especificacao.py
+	python3 testes/testes_correcao.py
 
 # compila todos os programas de testes/exemplos e testes/erros
 exemplos: $(ALVO)

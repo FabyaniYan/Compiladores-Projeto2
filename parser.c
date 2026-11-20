@@ -38,9 +38,9 @@ static int eof_registrado; /*evita registrar o sEOF duas vezes no .tk*/
 /*
  * globais/locais: posicoes de memoria ja ocupadas (proximo endereco livre)
  * nparam: celulas ocupadas pelos parametros da sub-rotina atual
- * func_idx/dentro_func/retorno_visto: controle do return da funcao atual
+ * func_idx/dentro_func: controle do return da funcao atual
  */
-static int globais, locais, nparam, func_idx, dentro_func, retorno_visto;
+static int globais, locais, nparam, func_idx, dentro_func;
 static char sub_atual[TOKEN_LEXEMA_MAX+16];
 /*
  * Assinatura de cada sub-rotina, indexada pelo indice dela na TS:
@@ -50,6 +50,7 @@ static char sub_atual[TOKEN_LEXEMA_MAX+16];
 static int idx_param[TS_MAX_SIMBOLOS], sig_count[TS_MAX_SIMBOLOS];
 static TipoSimbolo sig_tipo[TS_MAX_SIMBOLOS][MAX_ARGS];
 static int sig_ref[TS_MAX_SIMBOLOS][MAX_ARGS];
+static int sig_dim[TS_MAX_SIMBOLOS][MAX_ARGS];
 /*registra entrada/saida de um nao-terminal no .trc (opcao --trace)*/
 static void entrar(const char *n) {
     diag_info("%*s> %s",trace_depth*2,"",n);
@@ -270,10 +271,9 @@ static TipoSimbolo expr(void);
 
 /*
  * <vetr> ::= <id> "[" ("sCTEINT" | <id>) "]"   (a partir do colchete)
- * Espera o endereco do vetor no topo; gera o indice e INDX 1.
- * Indice constante fora de 1..tamanho e erro semantico.
+ * Verifica o indice antes de calcular o endereco do elemento.
  */
-static TipoSimbolo indice(int limite) {
+static TipoSimbolo indice(int limite,int vet) {
     Token t;
     entrar("vetr");
     consumir(sABRECOL);
@@ -281,13 +281,29 @@ static TipoSimbolo indice(int limite) {
         t=consumir(sCTEINT);
         int value=inteiro(t);
         if(value<1 || value>limite)diag_error(t.linha,"indice %d fora do intervalo 1..%d",value,limite);
+        pushaddr(vet);
         gen_emit("CRCT %d",value);
     }
     else if(atual.categoria==sIDENTIF){
-        int k;
+        int k,ok;
         t=consumir(sIDENTIF);
         k=variavel(t);
         exige(ts_get(k)->tipo,TS_INT,t.linha);
+        load(k);
+        gen_emit("CRCT 1");
+        gen_emit("CMME");
+        ok=gen_new_label();
+        gen_emit("DSVF L%d",ok);
+        gen_emit("PARA");
+        gen_label(ok);
+        load(k);
+        gen_emit("CRCT %d",limite);
+        gen_emit("CMMA");
+        ok=gen_new_label();
+        gen_emit("DSVF L%d",ok);
+        gen_emit("PARA");
+        gen_label(ok);
+        pushaddr(vet);
         load(k);
     }
     else diag_error(atual.linha,"indice de vetor deve ser inteiro ou identificador");
@@ -296,6 +312,7 @@ static TipoSimbolo indice(int limite) {
     sair("vetr");
     return TS_INT;
 }
+
 /*
  * Um argumento de chamada. VALIDACAO DE PARAMETROS: o tipo precisa bater
  * com a assinatura; parametro ref exige variavel e empilha o endereco.
@@ -314,12 +331,13 @@ static TipoSimbolo argumento(int idx,int p) {
         t=s->tipo;
         if(atual.categoria==sABRECOL){
             if(!vetor(t))diag_error(id.linha,"\"%s\" nao e vetor",id.lexema);
-            pushaddr(k);
-            indice(s->extra);
+            indice(s->extra,k);
             t=base(t);
         }
         else pushaddr(k);
         igual(sig_tipo[idx][p],t,linha);
+        if(vetor(t) && sig_dim[idx][p]!=s->extra)
+            diag_error(id.linha,"dimensao incompativel: esperado %d, recebido %d",sig_dim[idx][p],s->extra);
         return t;
     }
     t=expr();
@@ -415,8 +433,7 @@ static TipoSimbolo fact(void) {
             t=ts_get(k)->tipo;
             if(atual.categoria==sABRECOL){
                 if(!vetor(t))diag_error(id.linha,"\"%s\" nao e vetor",id.lexema);
-                pushaddr(k);
-                indice(ts_get(k)->extra);
+                indice(ts_get(k)->extra,k);
                 gen_emit("CONT");
                 t=base(t);
             }
@@ -519,17 +536,20 @@ static TipoSimbolo expr(void){
     sair("expr");
     return t;
 }
-static void cmd(void);
+static int cmd(void);
 /* ------------------------------------------------------------------ */
 /* 5. Comandos                                                         */
 /* ------------------------------------------------------------------ */
 
 /*sequencia {<cmd> ";"}*/
-static void cmds(void){
+static int cmds(void){
+    int garante=0;
     while(inicia(atual.categoria)){
-        cmd();
+        int r=cmd();
+        if(r)garante=1;
         consumir(sPONTOVIRGULA);
     }
+    return garante;
 }
 /* <echo> ::= "sECHO" "(" <elem> {"," <elem>} ")"   int/logic: IMPR, chr: IMPC, str: IMPS */
 static void echo(void){
@@ -560,8 +580,7 @@ static void get(void){
     t=ts_get(k)->tipo;
     if(atual.categoria==sABRECOL){
         if(!vetor(t))diag_error(id.linha,"identificador nao e vetor");
-        pushaddr(k);
-        indice(ts_get(k)->extra);
+        indice(ts_get(k)->extra,k);
         ind=1;
         t=base(t);
     }
@@ -576,7 +595,7 @@ static void get(void){
  * <case> ::= "sCASE" "(" <expr> ")" {<cmd> ";"} ["sOTHERWISE" {<cmd> ";"}] "sEND"
  * Gabarito do if: expr / DSVF Lsenao / cmds / DSVS Lfim / Lsenao: cmds / Lfim:
  */
-static void case_cmd(void){
+static int case_cmd(void){
     int end,else_l;
     TipoSimbolo t;
     entrar("case");
@@ -588,20 +607,21 @@ static void case_cmd(void){
     else_l=gen_new_label();
     end=gen_new_label();
     gen_emit("DSVF L%d",else_l);
-    cmds();
+    int then_ret=cmds(),else_ret=0;
     gen_emit("DSVS L%d",end);
     gen_label(else_l);
-    if(aceitar(sOTHERWISE))cmds();
+    if(aceitar(sOTHERWISE))else_ret=cmds();
     consumir(sEND);
     gen_label(end);
     sair("case");
+    return then_ret && else_ret;
 }
 /*
  * <chse> ::= "sCHOOSE" "(" <expr> ")" <mlst> "sEND"
  * O valor da expressao fica numa posicao temporaria (AMEM 1) e e comparado
  * com cada constante do match (CMIG); o primeiro que casar executa e sai.
  */
-static void choose_cmd(void){
+static int choose_cmd(void){
     int slot,end,found,match_l;
     Token v;
     TipoSimbolo t;
@@ -616,6 +636,7 @@ static void choose_cmd(void){
     gen_emit("ARMZ 1,%d",slot);
     if(atual.categoria!=sMATCH)diag_error(atual.linha,"choose exige match");
     end=gen_new_label();
+    int all_ret=1,has_others=0;
     while(atual.categoria==sMATCH){
         found=gen_new_label();
         match_l=gen_new_label();
@@ -636,16 +657,17 @@ static void choose_cmd(void){
         gen_emit("DSVS L%d",match_l);
         gen_label(found);
         consumir(sIMPLIC);
-        cmd();
+        if(!cmd())all_ret=0;
         consumir(sPONTOVIRGULA);
         gen_emit("DSVS L%d",end);
         gen_label(match_l);
         sair("mtch");
     }
     if(aceitar(sOTHERS)){
+        has_others=1;
         entrar("othr");
         consumir(sIMPLIC);
-        cmd();
+        if(!cmd())all_ret=0;
         consumir(sPONTOVIRGULA);
         sair("othr");
     }
@@ -654,6 +676,7 @@ static void choose_cmd(void){
     gen_emit("DMEM 1");
     locais--;
     sair("chse");
+    return has_others && all_ret;
 }
 /*limite do for: identificador int ou constante (com sinal)*/
 static void valor_for(void){
@@ -747,14 +770,14 @@ static void while_cmd(void){
  * <rept> ::= "sREPEAT" {<cmd> ";"} "sUNTIL" "(" <expr> ")"
  * Repete enquanto a condicao for falsa: Linicio: cmds / expr / DSVF Linicio
  */
-static void repeat_cmd(void){
+static int repeat_cmd(void){
     int begin;
     TipoSimbolo t;
     entrar("rept");
     consumir(sREPEAT);
     begin=gen_new_label();
     gen_label(begin);
-    cmds();
+    int guaranteed=cmds();
     consumir(sUNTIL);
     consumir(sABREPAR);
     t=expr();
@@ -762,6 +785,7 @@ static void repeat_cmd(void){
     consumir(sFECHAPAR);
     gen_emit("DSVF L%d",begin);
     sair("rept");
+    return guaranteed;
 }
 /*
  * <ret> ::= "sRETURN" <elem>
@@ -782,7 +806,6 @@ static void return_cmd(void){
     else gen_emit("ARMZ 1,%d",-(nparam+5));
     if(locais)gen_emit("DMEM %d",locais);
     gen_emit("RTPR %d",nparam);
-    retorno_visto=1;
     sair("ret");
 }
 /*
@@ -806,8 +829,7 @@ static void id_cmd(void){
     t=ts_get(k)->tipo;
     if(atual.categoria==sABRECOL){
         if(!vetor(t))diag_error(id.linha,"\"%s\" nao e vetor",id.lexema);
-        pushaddr(k);
-        indice(ts_get(k)->extra);
+        indice(ts_get(k)->extra,k);
         t=base(t);
         ind=1;
     }
@@ -822,47 +844,50 @@ static void id_cmd(void){
     sair("atr");
 }
 /* <cmd> ::= <echo>|<get>|<case>|<chse>|<for>|<whle>|<rept>|<call>|<ret>|<atr> */
-static void cmd(void){
+static int cmd(void){
+    int guaranteed=0;
     entrar("cmd");
     switch(atual.categoria){
         case sECHO:echo();
         break;
         case sGET:get();
         break;
-        case sCASE:case_cmd();
+        case sCASE:guaranteed=case_cmd();
         break;
-        case sCHOOSE:choose_cmd();
+        case sCHOOSE:guaranteed=choose_cmd();
         break;
         case sFOR:for_cmd();
         break;
         case sWHILE:while_cmd();
         break;
-        case sREPEAT:repeat_cmd();
+        case sREPEAT:guaranteed=repeat_cmd();
         break;
-        case sRETURN:return_cmd();
+        case sRETURN:return_cmd();guaranteed=1;
         break;
         case sIDENTIF:id_cmd();
         break;
         default:diag_error(atual.linha,"comando invalido");
     }
     sair("cmd");
+    return guaranteed;
 }
 /* ------------------------------------------------------------------ */
 /* 6. Blocos, sub-rotinas e programa                                   */
 /* ------------------------------------------------------------------ */
 
 /* <bco> ::= "sSTART" {<cmd> ";"} "sEND"   (abre o escopo .block#N) */
-static void bco(void){
+static int bco(void){
     char scope[TS_MAX_NOME];
     entrar("bco");
     blocos_sub++;
     snprintf(scope,sizeof(scope),"%s.block#%d",sub_atual,blocos_sub);
     ts_abre_escopo(scope);
     consumir(sSTART);
-    cmds();
+    int guaranteed=cmds();
     consumir(sEND);
     ts_fecha_escopo();
     sair("bco");
+    return guaranteed;
 }
 /*
  * <param> ::= ["sREF"] <id> ":" <type> {"," ["sREF"] <id> ":" <type>}
@@ -882,6 +907,7 @@ static void param(int idx){
         if(n>=MAX_ARGS)diag_error(id.linha,"parametros demais");
         sig_tipo[idx][n]=t;
         sig_ref[idx][n]=ref;
+        sig_dim[idx][n]=sz;
         int p=ts_insert(id.lexema,ref?TS_PARAM_REF:TS_PARAM,t,sz,id.linha);
         idx_param[n]=p;
         n++;
@@ -895,7 +921,8 @@ static void inicializa_vetores(CategoriaSimbolo cat){
     for(int k=0;k<TS_MAX_SIMBOLOS;k++){
         const Simbolo *s=ts_get(k);
         if(!s)break;
-        if(s->categoria==cat&&vetor(s->tipo)){
+        if(s->categoria==cat&&vetor(s->tipo)&&
+           (cat==TS_VAR_GLOBAL || ts_lookup_local(s->lexema)==k)){
             gen_emit("CRCT %d",s->extra);
             gen_emit("ARMZ %d,%d",s->nivel,s->endereco);
         }
@@ -949,26 +976,12 @@ static void subrotina(void){
     }
     func_idx=idx;
     dentro_func=isfunc;
-    retorno_visto=0;
     locais=0;
     if(atual.categoria==sLOCVARS)lvars();
     if(locais)gen_emit("AMEM %d",locais);
     inicializa_vetores(TS_VAR_LOCAL);
-    bco();
-    if(isfunc && !retorno_visto) diag_error(id.linha,"funcao \"%s\" exige return",id.lexema);
-    if(isfunc){
-        /*caminhos sem return recebem valor padrao (exigimos ao menos um return)*/
-        if(ts_get(idx)->tipo==TS_STR){
-            gen_emit("CREN 1,%d",-(nparam+4+STR_CELLS));
-            gen_emit("CRST \"\"");
-            gen_emit("AMEM %d",STR_CELLS-1);
-            gen_emit("ARVM %d",STR_CELLS);
-        }
-        else{
-            gen_emit("CRCT 0");
-            gen_emit("ARMZ 1,%d",-(nparam+5));
-        }
-    }
+    int retorno_garantido=bco();
+    if(isfunc && !retorno_garantido) diag_error(id.linha,"funcao \"%s\" exige return em todos os caminhos",id.lexema);
     if(locais)gen_emit("DMEM %d",locais);
     gen_emit("RTPR %d",nparam);
     ts_fecha_escopo();
